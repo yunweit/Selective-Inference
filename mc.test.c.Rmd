@@ -1,0 +1,126 @@
+---
+title: "MC.test.c"
+author: "Yunwei Tu"
+date: "25/01/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(selectiveInference)
+library(rgl)
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+# Case c
+
+
+```{r}
+case.c.fun <- function(sd = 1, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, b2.low = -2, b2.up = 2, B = 500, n = 100){
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b2.low and b2.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        beta2 = seq(from = b2.low, to = b2.up, length.out = lo)
+        # B: how many CI needs to be calculated for each mu
+        # n: sample size
+  
+        # Matrix to store the results
+        ci.prop.mat.act <- matrix(NA, nrow = length(beta1), ncol = length(beta2))
+        ci.cov.mat.act <- matrix(NA, nrow = length(beta1), ncol = length(beta2))
+
+        
+        for (i in 1:length(beta1)) {
+              for (j in 1:length(beta2)) {
+                      ci.ind.act <- rep(0, B)
+                      cov.ind.act <- c()
+                      for (k in 1:B)  {
+                              # Generate data
+                              x1 = rnorm(100, mean = 0, sd = x.sd)
+                              x2 = rnorm(100, mean = 3, sd = x.sd)
+                              err = rnorm(100, mean = 0, sd = sd)
+                              x = cbind(x1, x2)
+                              b1 <- beta1[i]
+                              b2 <- beta2[j]
+                              y = mu + b1 * x1 + b2 * x2 + err
+                          
+                              # 1 step into Forward Selection
+                              # Get p-value & confidence interval (if significant) for beta1
+                              fsfit = fs(x = x, y = y, maxsteps = 1)
+                              out.fs.act <- fsInf(fsfit, alpha = 0.05)
+
+
+                              if (fsfit$action[1] != 1) {
+                                next
+                              }
+                              
+                              b1.pv.act <- out.fs.act$pv[which(fsfit$action == 1)]
+                              b1.cv.act <- out.fs.act$ci[which(fsfit$action == 1),]
+                              if (b1.pv.act < 0.025 || b1.pv.act > 0.975) {
+                                      ci.ind.act[k] <- 1
+                              }
+                              cov.ind.act <- c(cov.ind.act, 0)
+                              if (b1 < b1.cv.act[2] && b1.cv.act[1] < b1) {
+                                      cov.ind.act[length(cov.ind.act)] <- 1
+                              }
+                      }
+                      ci.prop.mat.act[i, j] = mean(ci.ind.act)
+                      if (length(cov.ind.act) == 0){
+                              ci.cov.mat.act[i,j] = 0
+                      }
+                      else {
+                              ci.cov.mat.act[i, j] = mean(cov.ind.act)
+                      }
+              }
+        }
+        return(list(prop.act = ci.prop.mat.act, cov.act = ci.cov.mat.act))
+}
+
+```
+
+
+
+```{r, cache = TRUE}
+results.c <- case.c.fun(lo = 100) 
+```
+
+```{r, webgl=TRUE}
+prop.act = results.c$prop.act
+cov.act = results.c$cov.act
+        
+        
+beta1 = seq(from = -2, to = 2, length.out = 100)
+beta2 = seq(from = -2, to = 2, length.out = 100)
+        
+# number of time we calculate the CI, type = active
+nbcol = 100
+color = rev(rainbow(nbcol, start = 0/6, end = 4/6))
+zcol  = cut(prop.act, nbcol)
+persp3d(beta1, beta2, prop.act, theta=50, phi=25, expand=0.75, 
+        col=color[zcol], ticktype="detailed",axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+ 
+```
+
+```{r, webgl=TRUE}       
+# Coverage Probability, type = active
+nbcol = 100
+color = rev(rainbow(nbcol, start = 0/6, end = 4/6))
+zcol  = cut(cov.act, nbcol)
+next3d()
+persp3d(beta1, beta2, cov.act, theta=50, phi=25, expand=0.75, 
+        col=color[zcol],ticktype="detailed",axes=TRUE, 
+        zlab = "Coverage Probability")
+surface3d(x = beta1, beta2, rep(0.95, 100^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+
+
+

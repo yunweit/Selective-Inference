@@ -1,0 +1,695 @@
+---
+title: "mc.test.a"
+author: "Yunwei Tu"
+date: "03/02/2021"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(selectiveInference)
+source("PITV3.R")
+source("PITV3.new.R")
+```
+
+# Case a
+
+Wrapped into a function, where the inputs give the constraint of the simulation
+
+```{r}
+case.a.fun <- function(sd = 1, epsilon = 1.96, lo = 200, mu.low = -5, mu.up = 5, 
+                       m = 500, n = 100){
+    # lo: # of mus to be considered in the range
+    # mu.low and mu.up define the range of mus
+    mus = seq(mu.low, mu.up, length.out = lo)
+    # m: Each datapoint need to has m CI's calculated (default m = 500)
+    # n: sample size (default n = 100)
+    # sd: the standard deviation of the generated sample (default sd = 1)
+    # epsilon: cutoff, default epsilon = 1.96
+    
+    # Dataframe to store the result
+    result.a <- data.frame(mu = mus,
+                           og.ci.length = vector(mode = "numeric", length = length(mus)),
+                           new.ci.length = vector(mode = "numeric", length = length(mus)),
+                           og.ci.low = vector(mode = "numeric", length = length(mus)),
+                           og.ci.up = vector(mode = "numeric", length = length(mus)),
+                           new.ci.low = vector(mode = "numeric", length = length(mus)),
+                           new.ci.up = vector(mode = "numeric", length = length(mus)),
+                           cov = vector(mode = "numeric", length = length(mus)),
+                           cov.new = vector(mode = "numeric", length = length(mus)),
+                           prop = vector(mode = "numeric", length = length(mus))
+                           )
+    
+    for (i in 1:length(mus)) {
+            # make sure that each mu has m CI calculated
+            mu = mus[i]
+            epsilon.r = epsilon /sqrt(n) * sd
+            p.rej = pnorm(-epsilon.r, mean = mu, sd = sd/sqrt(n)) + 
+                pnorm(epsilon.r, mean = mu, sd = sd/sqrt(n), lower.tail = FALSE)
+            B = floor(m/p.rej)
+            
+            
+            # indicator vector, whether a CI is calculated
+            ci.ind <- rep(0,B)
+            # indicator vector, whether the true value is covered by CI, both methods
+            cov.ind <- c()
+            cov.ind.new <- c()
+            
+            # vector to store the lengths of the CI's
+            o.ci.length <- c()
+            n.ci.length <- c()
+            
+            # vector to store the lower and upper bound of the CI (original method)
+            o.ci.low <- c()
+            o.ci.up <- c()
+            
+            # vector to store the lower and upper bound of the CI (new method)
+            n.ci.low <- c()
+            n.ci.up <- c()
+            for (k in 1:B) {
+                # Generate data
+                y = rnorm(n, mean = mu, sd = sd)
+    
+                # Estimate mu by y_bar
+                
+                ybar = mean(y)
+                
+                # Calculate the CI ybar > 1.96/sqrt(n)*sd
+                if (abs(ybar) > epsilon.r) {
+                    ci.ind[k] <- 1
+                }
+                
+                # What is the coverage probability
+                if (abs(ybar) > epsilon.r) {
+                    cov.ind <- c(cov.ind, 0)
+                    cov.ind.new <- c(cov.ind.new, 0)
+                    ## Get CI using original method
+                    og.ci <- Get3.interval(ybar, epsilon.r,alpha=0.05, 
+                                           sd = sd/sqrt(n))
+                    ## Get CI using new method
+                   # print(ybar)
+                    new.ci <- Get3.interval.new(ybar, epsilon.r,
+                                                alpha = 0.05, sd = sd/sqrt(n))
+                    
+                    
+                    ## Store the results
+                    o.ci.length <- c(o.ci.length, og.ci[2] - og.ci[1])
+                    n.ci.length <- c(n.ci.length, new.ci[2] - new.ci[1])
+            
+                    o.ci.low <- c(o.ci.low, og.ci[1])
+                    o.ci.up <- c(o.ci.up, og.ci[2])
+                    
+                    n.ci.low <- c(n.ci.low, new.ci[1])
+                    n.ci.up <- c(n.ci.up, new.ci[2])
+                    
+                    # Original
+                    if (mu < og.ci[2] && og.ci[1] < mu) {
+                        cov.ind[length(cov.ind)] <- 1
+                    }
+                    ## New method
+                    if (mu < new.ci[2] && new.ci[1] < mu) {
+                        cov.ind.new[length(cov.ind.new)] <- 1
+                    }
+                }
+            }
+            #print(i)
+            result.a$prop[i] = mean(ci.ind)
+            ## Original method
+            if (length(cov.ind) == 0){
+                result.a$cov[i] = 0
+            }
+            else {
+                result.a$cov[i] = mean(cov.ind)
+            }
+            
+            ## New Method
+            if (length(cov.ind.new) == 0){
+                result.a$cov.new[i] = 0
+            }
+            else {
+                result.a$cov.new[i] = mean(cov.ind.new)
+            }
+            
+            result.a$og.ci.length[i] <- mean(o.ci.length)
+            result.a$new.ci.length[i] <- mean(n.ci.length)
+            
+            result.a$og.ci.low[i] <- mean(o.ci.low)
+            result.a$og.ci.up[i] <- mean(o.ci.up)
+            
+            result.a$new.ci.low[i] <- mean(n.ci.low)
+            result.a$new.ci.up[i] <- mean(n.ci.up)
+    }
+    return(result.a)
+}
+```
+
+Function to plot the results
+
+```{r, echo = FALSE}
+plot.a <- function(result.a, ylim = 100, sd = 1, mu.low = -5, mu.up = 5, 
+                   epsilon = 1.96, n = 100){
+    mus <- seq(mu.low, mu.up, length.out = 200)
+    # The # of time we calculate CI
+    with(result.a, {plot(mu, prop, type = "l", lty = 1.5,
+                         main = paste0("fraction of time H0 is rejected", ", sd = ", sd), 
+                         ylim = c(0, 1), ylab = "")
+        abline(h = 0.05, col = "red")
+        theory <- pnorm(-epsilon /sqrt(n) * sd, mean = mus, sd = sd/sqrt(n)) + 
+          pnorm(epsilon /sqrt(n) * sd, mean = mus, sd = sd/sqrt(n), lower.tail = FALSE)
+        lines(mus, theory, col = "blue")
+        legend("right", col = c("black", "blue", "red"), lty = 1, 
+               legend = c("simulation", "theory", "fraction = 0.05"),cex = 0.75)
+        })
+    
+    
+    # Coverage Probability
+    
+    with(result.a, {plot(mu, cov.new, type = "l", 
+                         main = paste0("coverage probability", ", sd = ", sd),
+                         col = "blue", ylim = c(0.8, 1), ylab = "")
+        lines(mu, cov, type = "l", ylab = "coverage probability")
+        abline(h = 0.95, col = "red")
+        legend("bottomright", col = c("black", "blue"), lty = 1,
+               legend = c("not conditioning on sign", "conditioning on sign"),cex = 0.75)
+        })
+    
+    
+    ## Length of CI
+    with(result.a, {
+        plot(mu, new.ci.length, type = "l", 
+             main = paste0("length of ci", ", sd = ", sd), 
+             col = "blue", ylim = c(0, ylim), ylab = "")
+         lines(mu, og.ci.length, type = "l")
+         legend("topright", col = c("black", "blue"), lty = 1, 
+                legend = c("not conditioning on sign", "conditioning on sign"), cex = 0.75)
+         })
+    
+    
+    with(result.a, {
+        plot(mu, new.ci.low, type = "l", 
+             main = paste0("Confidence Interval", ", sd = ", sd),
+             ylim = c(-ylim/2, ylim/2), col = "blue", ylab = "")
+        lines(mu, og.ci.low, type = "l")
+        
+        
+        lines(mu, new.ci.up, type = "l", col = "blue")
+        lines(mu, og.ci.up, type = "l")
+        legend("bottomright", col = c("black", "blue"), lty = 1, 
+               legend = c("not conditioning on sign", "conditioning on sign"), cex = 0.75)
+    })
+}
+```
+
+## sd = 1
+
+```{r sd-1, cache = TRUE}
+result.1 <- case.a.fun(sd = 1)
+```
+
+```{r}
+plot.a(result.1, ylim = 15, sd = 1)
+```
+
+
+## sd = 5
+
+```{r sd-5, cache = TRUE}
+result.5 <- case.a.fun(sd = 5)
+```
+
+```{r}
+plot.a(result.5, sd = 5)
+```
+
+## sd = 10
+
+```{r sd-10, cache = TRUE}
+result.10 <- case.a.fun(sd = 10)
+```
+
+```{r}
+plot.a(result.10, sd = 10)
+```
+
+## sd = 15
+
+```{r sd-15, cache = TRUE}
+result.15 <- case.a.fun(sd = 15)
+```
+
+```{r}
+plot.a(result.15, sd = 15, ylim = 100)
+```
+
+## sd = 20
+
+```{r sd-20, cache = TRUE}
+result.20 <- case.a.fun(sd = 20, mu.low = -10, mu.up = 10, lo = 400)
+```
+
+```{r}
+plot.a(result.20, ylim = 200, sd = 20)
+```
+
+
+# t distribution
+
+```{r}
+case.a.fun.t <- function(epsilon = 1.96, lo = 200, mu.low = -5, mu.up = 5, 
+                       B = 500, n = 100, df = 4){
+    # lo: # of mus to be considered in the range
+    # mu.low and mu.up define the range of mus
+    mus = seq(mu.low, mu.up, length.out = lo)
+    # m: Each datapoint need to has m CI's calculated (default m = 500)
+    # n: sample size (default n = 100)
+    # sd: the standard deviation of the generated sample (default sd = 1)
+    # epsilon: cutoff, default epsilon = 1.96
+    
+    # Dataframe to store the result
+    result.a <- data.frame(mu = mus,
+                           og.ci.length = vector(mode = "numeric", length = length(mus)),
+                           new.ci.length = vector(mode = "numeric", length = length(mus)),
+                           og.ci.low = vector(mode = "numeric", length = length(mus)),
+                           og.ci.up = vector(mode = "numeric", length = length(mus)),
+                           new.ci.low = vector(mode = "numeric", length = length(mus)),
+                           new.ci.up = vector(mode = "numeric", length = length(mus)),
+                           cov = vector(mode = "numeric", length = length(mus)),
+                           cov.new = vector(mode = "numeric", length = length(mus)),
+                           prop = vector(mode = "numeric", length = length(mus))
+                           )
+    
+    for (i in 1:length(mus)) {
+
+            # indicator vector, whether a CI is calculated
+            ci.ind <- c()
+            # indicator vector, whether the true value is covered by CI, both methods
+            cov.ind <- c()
+            cov.ind.new <- c()
+            
+            # vector to store the lengths of the CI's
+            o.ci.length <- c()
+            n.ci.length <- c()
+            
+            # vector to store the lower and upper bound of the CI (original method)
+            o.ci.low <- c()
+            o.ci.up <- c()
+            
+            # vector to store the lower and upper bound of the CI (new method)
+            n.ci.low <- c()
+            n.ci.up <- c()
+            k = 0
+            mu = mus[i]
+            while (k < B) {
+                ci.ind <- c(ci.ind, 0)
+                # Generate data
+                err = rt(n, df)
+                y = mu + err
+                var.y = df/(df-2)
+                sd = sqrt(var.y)
+                epsilon.r = epsilon /sqrt(n) * sd
+
+                # Estimate mu by y_bar
+                
+                ybar = mean(y)
+                
+                # Calculate the CI ybar > 1.96/sqrt(n)*sd
+                if (abs(ybar) > epsilon.r) {
+                    ci.ind[length(ci.ind)] <- 1
+                }
+                
+                # What is the coverage probability
+                if (abs(ybar) > epsilon.r) {
+                    cov.ind <- c(cov.ind, 0)
+                    cov.ind.new <- c(cov.ind.new, 0)
+                    ## Get CI using original method
+                    og.ci <- Get3.interval(ybar, epsilon.r,alpha=0.05, 
+                                           sd = sd/sqrt(n))
+                    ## Get CI using new method
+                   # print(ybar)
+                    new.ci <- Get3.interval.new(ybar, epsilon.r,
+                                                alpha = 0.05, sd = sd/sqrt(n))
+                    
+                    
+                    ## Store the results
+                    o.ci.length <- c(o.ci.length, og.ci[2] - og.ci[1])
+                    n.ci.length <- c(n.ci.length, new.ci[2] - new.ci[1])
+            
+                    o.ci.low <- c(o.ci.low, og.ci[1])
+                    o.ci.up <- c(o.ci.up, og.ci[2])
+                    
+                    n.ci.low <- c(n.ci.low, new.ci[1])
+                    n.ci.up <- c(n.ci.up, new.ci[2])
+                    
+                    # Original
+                    if (mu < og.ci[2] && og.ci[1] < mu) {
+                        cov.ind[length(cov.ind)] <- 1
+                        k = k + 1
+                    }
+                    ## New method
+                    if (mu < new.ci[2] && new.ci[1] < mu) {
+                        cov.ind.new[length(cov.ind.new)] <- 1
+                    }
+                }
+            }
+            #print(i)
+            result.a$prop[i] = mean(ci.ind)
+            ## Original method
+            if (length(cov.ind) == 0){
+                result.a$cov[i] = 0
+            }
+            else {
+                result.a$cov[i] = mean(cov.ind)
+            }
+            
+            ## New Method
+            if (length(cov.ind.new) == 0){
+                result.a$cov.new[i] = 0
+            }
+            else {
+                result.a$cov.new[i] = mean(cov.ind.new)
+            }
+            
+            result.a$og.ci.length[i] <- mean(o.ci.length)
+            result.a$new.ci.length[i] <- mean(n.ci.length)
+            
+            result.a$og.ci.low[i] <- mean(o.ci.low)
+            result.a$og.ci.up[i] <- mean(o.ci.up)
+            
+            result.a$new.ci.low[i] <- mean(n.ci.low)
+            result.a$new.ci.up[i] <- mean(n.ci.up)
+    }
+    return(result.a)
+}
+```
+
+
+```{r, echo = FALSE}
+plot.a.t <- function(result.a, result.1, ylim = 100, df = 4){
+    # The # of time we calculate CI
+    with(result.a, {plot(mu, prop, type = "l", 
+                         main = paste0("fraction of time H0 is rejected", ", df = ", df), 
+                         ylim = c(0, 1), ylab = "")
+        lines(result.1$mu, result.1$prop, type = "l", col = "blue")
+        abline(h = 0.05, col = "red")
+        legend("right", col = c("black", "blue", "red"), lty = 1, 
+               legend = c("t", "standard normal", "fraction = 0.05"),cex = 0.75)
+        })
+    
+    
+    # Coverage Probability
+    
+    with(result.a, {plot(mu, cov.new, type = "l", ylim = c(0.8, 1),
+                         main = paste0("coverage probability", ", df = ", df),
+                         col = "blue", ylab = "")
+        lines(mu, cov, type = "l", ylab = "coverage probability")
+        abline(h = 0.95, col = "red")
+        legend("bottomright", col = c("black", "blue"), lty = 1,
+               legend = c("not conditioning on sign", "conditioning on sign"),cex = 0.75)
+        })
+    
+    
+    ## Length of CI
+    with(result.a, {
+        plot(mu, new.ci.length, type = "l", 
+             main = paste0("length of ci", ", df = ", df), 
+             col = "blue", ylim = c(0, ylim), ylab = "")
+         lines(mu, og.ci.length, type = "l")
+         legend("topright", col = c("black", "blue"), lty = 1, 
+                legend = c("not conditioning on sign", "conditioning on sign"), cex = 0.75)
+         })
+    
+    
+    with(result.a, {
+        plot(mu, new.ci.low, type = "l", 
+             main = paste0("Confidence Interval", ", df = ", df),
+             ylim = c(-ylim/2, ylim/2), col = "blue", ylab = "")
+        lines(mu, og.ci.low, type = "l")
+        
+        
+        lines(mu, new.ci.up, type = "l", col = "blue")
+        lines(mu, og.ci.up, type = "l")
+        legend("bottomright", col = c("black", "blue"), lty = 1, 
+               legend = c("not conditioning on sign", "conditioning on sign"), cex = 0.75)
+    })
+}
+```
+
+
+## df = 4
+
+```{r df-4, cache = TRUE}
+result.df.4 <- case.a.fun.t(df = 4)
+```
+
+```{r}
+plot.a.t(result.df.4, result.1,ylim = 15, df = 4)
+```
+
+
+## df = 6
+
+```{r df-6, cache = TRUE}
+result.df.6 <- case.a.fun.t(df = 6)
+```
+
+```{r}
+plot.a.t(result.df.6, result.1, ylim = 15, df = 6)
+```
+
+
+## df = 10
+
+```{r df-10, cache = TRUE}
+result.df.10 <- case.a.fun.t(df = 10)
+```
+
+```{r}
+plot.a.t(result.df.10, result.1, ylim = 15, df = 10)
+```
+
+
+# Gamma Distribution
+
+```{r}
+case.a.fun.gamma <- function(epsilon = 1.96, lo = 200, mu.low = -5, mu.up = 5, 
+                       B = 500, n = 100, shape = 1, rate = 1){
+    # lo: # of mus to be considered in the range
+    # mu.low and mu.up define the range of mus
+    mus = seq(mu.low, mu.up, length.out = lo)
+    # m: Each datapoint need to has m CI's calculated (default m = 500)
+    # n: sample size (default n = 100)
+    # sd: the standard deviation of the generated sample (default sd = 1)
+    # epsilon: cutoff, default epsilon = 1.96
+    
+    # Dataframe to store the result
+    result.a <- data.frame(mu = mus,
+                           og.ci.length = vector(mode = "numeric", length = length(mus)),
+                           new.ci.length = vector(mode = "numeric", length = length(mus)),
+                           og.ci.low = vector(mode = "numeric", length = length(mus)),
+                           og.ci.up = vector(mode = "numeric", length = length(mus)),
+                           new.ci.low = vector(mode = "numeric", length = length(mus)),
+                           new.ci.up = vector(mode = "numeric", length = length(mus)),
+                           cov = vector(mode = "numeric", length = length(mus)),
+                           cov.new = vector(mode = "numeric", length = length(mus)),
+                           prop = vector(mode = "numeric", length = length(mus))
+                           )
+    
+    for (i in 1:length(mus)) {
+
+            # indicator vector, whether a CI is calculated
+            ci.ind <- c()
+            # indicator vector, whether the true value is covered by CI, both methods
+            cov.ind <- c()
+            cov.ind.new <- c()
+            
+            # vector to store the lengths of the CI's
+            o.ci.length <- c()
+            n.ci.length <- c()
+            
+            # vector to store the lower and upper bound of the CI (original method)
+            o.ci.low <- c()
+            o.ci.up <- c()
+            
+            # vector to store the lower and upper bound of the CI (new method)
+            n.ci.low <- c()
+            n.ci.up <- c()
+            k = 0
+            mu = mus[i]
+            for (k in 1:B) {
+                ci.ind <- c(ci.ind, 0)
+                # Generate data
+                err = rgamma(n, shape = shape, rate = rate)
+                y = mu + err - shape/rate
+                var.y = shape/(rate^2)
+                sd = sqrt(var.y)
+                epsilon.r = epsilon /sqrt(n) * sd
+
+                # Estimate mu by y_bar
+                
+                ybar = mean(y)
+                
+                # Calculate the CI ybar > 1.96/sqrt(n)*sd
+                if (abs(ybar) > epsilon.r) {
+                    ci.ind[length(ci.ind)] <- 1
+                }
+                
+                # What is the coverage probability
+                if (abs(ybar) > epsilon.r) {
+                    cov.ind <- c(cov.ind, 0)
+                    cov.ind.new <- c(cov.ind.new, 0)
+                    ## Get CI using original method
+                    og.ci <- Get3.interval(ybar, epsilon.r,alpha=0.05, 
+                                           sd = sd/sqrt(n))
+                    ## Get CI using new method
+                   # print(ybar)
+                    new.ci <- Get3.interval.new(ybar, epsilon.r,
+                                                alpha = 0.05, sd = sd/sqrt(n))
+                    
+                    
+                    ## Store the results
+                    o.ci.length <- c(o.ci.length, og.ci[2] - og.ci[1])
+                    n.ci.length <- c(n.ci.length, new.ci[2] - new.ci[1])
+            
+                    o.ci.low <- c(o.ci.low, og.ci[1])
+                    o.ci.up <- c(o.ci.up, og.ci[2])
+                    
+                    n.ci.low <- c(n.ci.low, new.ci[1])
+                    n.ci.up <- c(n.ci.up, new.ci[2])
+                    
+                    # Original
+                    if (mu < og.ci[2] && og.ci[1] < mu) {
+                        cov.ind[length(cov.ind)] <- 1
+                    }
+                    ## New method
+                    if (mu < new.ci[2] && new.ci[1] < mu) {
+                        cov.ind.new[length(cov.ind.new)] <- 1
+                    }
+                }
+            }
+            #print(i)
+            result.a$prop[i] = mean(ci.ind)
+            ## Original method
+            if (length(cov.ind) == 0){
+                result.a$cov[i] = 0
+            }
+            else {
+                result.a$cov[i] = mean(cov.ind)
+            }
+            
+            ## New Method
+            if (length(cov.ind.new) == 0){
+                result.a$cov.new[i] = 0
+            }
+            else {
+                result.a$cov.new[i] = mean(cov.ind.new)
+            }
+            
+            result.a$og.ci.length[i] <- mean(o.ci.length)
+            result.a$new.ci.length[i] <- mean(n.ci.length)
+            
+            result.a$og.ci.low[i] <- mean(o.ci.low)
+            result.a$og.ci.up[i] <- mean(o.ci.up)
+            
+            result.a$new.ci.low[i] <- mean(n.ci.low)
+            result.a$new.ci.up[i] <- mean(n.ci.up)
+    }
+    return(result.a)
+}
+```
+
+```{r, echo = FALSE}
+plot.a.gamma <- function(result.a, result.1, ylim = 100, shape = 1, rate = 1){
+    # The # of time we calculate CI
+    with(result.a, {plot(mu, prop, type = "l", 
+                         main = paste0("fraction of time H0 is rejected, shape = ", 
+                                       shape, " rate = ", rate), 
+                         ylim = c(0, 1), ylab = "")
+        lines(result.1$mu, result.1$prop, type = "l", col = "blue")
+        abline(h = 0.05, col = "red")
+        legend("right", col = c("black", "blue", "red"), lty = 1, 
+               legend = c("gamma", "standard normal", "fraction = 0.05"),cex = 0.75)
+        })
+    
+    
+    # Coverage Probability
+    
+    with(result.a, {plot(mu, cov.new, type = "l", ylim = c(0.8, 1),
+                         main = paste0("coverage probability, shape = ", 
+                                       shape, " rate = ", rate),
+                         col = "blue", ylab = "")
+        lines(mu, cov, type = "l", ylab = "coverage probability")
+        abline(h = 0.95, col = "red")
+        legend("bottomright", col = c("black", "blue"), lty = 1,
+               legend = c("not conditioning on sign", "conditioning on sign"),cex = 0.75)
+        })
+    
+    
+    ## Length of CI
+    with(result.a, {
+        plot(mu, new.ci.length, type = "l", 
+             main = paste0("length of ci, shape = ", 
+                                       shape, " rate = ", rate), 
+             col = "blue", ylim = c(0, ylim), ylab = "")
+         lines(mu, og.ci.length, type = "l")
+         legend("topright", col = c("black", "blue"), lty = 1, 
+                legend = c("not conditioning on sign", "conditioning on sign"), cex = 0.75)
+         })
+    
+    
+    with(result.a, {
+        plot(mu, new.ci.low, type = "l", 
+             main = paste0("Confidence Interval, shape = ", 
+                                       shape, " rate = ", rate),
+             ylim = c(-ylim/2, ylim/2), col = "blue", ylab = "")
+        lines(mu, og.ci.low, type = "l")
+        
+        
+        lines(mu, new.ci.up, type = "l", col = "blue")
+        lines(mu, og.ci.up, type = "l")
+        legend("bottomright", col = c("black", "blue"), lty = 1, 
+               legend = c("not conditioning on sign", "conditioning on sign"), cex = 0.75)
+    })
+}
+```
+## Gamma(1,1)
+
+```{r gamma1-1, cache = TRUE}
+result.g11 <- case.a.fun.gamma() 
+```
+
+```{r}
+plot.a.gamma(result.g11, result.1, ylim = 20)
+```
+
+## Gamma(3,1)
+
+```{r gamma3-1, cache = TRUE}
+result.g31 <- case.a.fun.gamma(shape = 3) 
+```
+
+```{r}
+plot.a.gamma(result.g31, result.1, ylim = 20, shape = 3)
+```
+
+## Gamma(1,0.5)
+
+```{r gamma1-05, cache = TRUE}
+result.g105 <- case.a.fun.gamma(shape = 1, rate = 0.5) 
+```
+
+```{r}
+plot.a.gamma(result.g105, result.1, ylim = 20, shape = 1, rate = 0.5)
+```
+
+## Gamma(3,0.5)
+
+```{r gamma3-05, cache = TRUE}
+result.g305 <- case.a.fun.gamma(shape = 3, rate = 0.5) 
+```
+
+```{r}
+plot.a.gamma(result.g305, result.1, ylim = 20, shape = 3, rate = 0.5)
+```

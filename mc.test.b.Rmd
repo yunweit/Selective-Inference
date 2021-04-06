@@ -1,0 +1,521 @@
+---
+title: "mc.test.b"
+author: "Yunwei Tu"
+date: "01/02/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(selectiveInference)
+library(Rmpfr)
+```
+
+
+# Case b
+
+```{r}
+case.b.fun <- function(sd = 1, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, B = 500, n = 100){
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b1.low and b1.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        # B: how many CI needs to be calculated for each mu
+        # n: sample size
+        
+        # Dataframe to store the results
+        results.b <- data.frame(beta1 = beta1, prop = rep(NA, length(beta1)), 
+                                cov = rep(NA, length(beta1)))
+
+        
+        for (i in 1:length(beta1)) {
+                # Vectors to store the results
+                ci.ind <- c()
+                cov.ind <- c()
+                k = 0
+                while (k < B) {
+                        ci.ind <- c(ci.ind, 0)
+                        # Generate data
+                        x1 = rnorm(n, mean = 0, sd = x.sd)
+                        err = rnorm(n, mean = 0, sd = sd)
+                        b1 <- beta1[i]
+                        x = cbind(x1)
+                        y = mu + b1 * x1 + err
+                
+                        # 1 step into Forward Selection
+                        # Get p-value & confidence interval (if significant) for beta1
+                        fsfit = fs(x = x, y = y, maxsteps = 1)
+                        out.fs <- fsInf(fsfit, alpha = 0.05)
+                    
+                        b1.pv <- out.fs$pv[1]
+                        b1.cv <- out.fs$ci[1,]
+                        # Calculate the CI if the first variable entered is x1
+                        # and the null is rejected
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                ci.ind[length(ci.ind)] <- 1
+                                k = k + 1
+                        }
+                    
+                        # What is the coverage probability
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                cov.ind <- c(cov.ind, 0)
+                                if (b1 < b1.cv[2] && b1.cv[1] < b1) {
+                                        cov.ind[length(cov.ind)] <- 1
+                                }
+                        }
+                }
+                #print(i)
+                results.b$prop[i] = mean(ci.ind)
+                if (length(cov.ind) == 0){
+                        results.b$cov[i] = 0
+                }
+                else {
+                        results.b$cov[i] = mean(cov.ind)
+                }
+        }
+        return(results.b)
+}
+
+
+```
+
+```{r}
+plot.b <- function(result.b) {
+        with(result.b, {
+                plot(beta1, prop, type = "l", 
+                     main = "fraction of time H0 is rejected", ylab = "")
+                abline(h = 0.05, col = "red")
+                legend("right", col = c( "red"), lty = 1, 
+                       legend = c("fraction = 0.05"),cex = 0.75)
+        })
+
+        with(result.b, {
+                plot(beta1, cov, type = "l", 
+                     main = "coverage probability", ylab = "")
+                abline(h = 0.95, col = "red")})
+}
+```
+
+
+```{r sd-1, cache = TRUE}
+result.b.1 <- case.b.fun()
+```
+
+```{r sd-1-plot}
+plot.b(result.b.1)
+```
+
+```{r sd-10, cache = TRUE}
+result.b.10 <- case.b.fun(sd = 10)
+```
+
+```{r sd-10-plot}
+plot.b(result.b.10)
+```
+
+
+```{r}
+case.b.fun.t <- function(df = 4, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, B = 500, n = 100){
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b1.low and b1.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        # B: how many CI needs to be calculated for each mu
+        # n: sample size
+        
+        # Dataframe to store the results
+        results.b <- data.frame(beta1 = beta1, prop = rep(NA, length(beta1)), 
+                                cov = rep(NA, length(beta1)))
+
+        
+        for (i in 1:length(beta1)) {
+                # Vectors to store the results
+                ci.ind <- c()
+                cov.ind <- c()
+                for (k in 1:B) {
+                        ci.ind <- c(ci.ind, 0)
+                        # Generate data
+                        x1 = rnorm(n, mean = 0, sd = x.sd)
+                        err  = rt(n, df)
+                        
+                        b1 <- beta1[i]
+                        x = cbind(x1)
+                        y = mu + b1 * x1 + err
+                
+                        # 1 step into Forward Selection
+                        # Get p-value & confidence interval (if significant) for beta1
+                        fsfit = fs(x = x, y = y, maxsteps = 1)
+                        out.fs <- fsInf(fsfit, alpha = 0.05, bits = 100)
+                    
+                        b1.pv <- out.fs$pv[1]
+                        b1.cv <- out.fs$ci[1,]
+                        # Calculate the CI if the first variable entered is x1
+                        # and the null is rejected
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                ci.ind[length(ci.ind)] <- 1
+                        }
+                    
+                        # What is the coverage probability
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                cov.ind <- c(cov.ind, 0)
+                                if (b1 < b1.cv[2] && b1.cv[1] < b1) {
+                                        cov.ind[length(cov.ind)] <- 1
+                                }
+                        }
+                }
+                #print(i)
+                results.b$prop[i] = mean(ci.ind)
+                if (length(cov.ind) == 0){
+                        results.b$cov[i] = 0
+                }
+                else {
+                        results.b$cov[i] = mean(cov.ind)
+                }
+        }
+        return(results.b)
+}
+
+
+```
+
+
+```{r}
+plot.b.t <- function(result.b, result.b.1, df = 4) {
+        with(result.b, {
+                plot(beta1, prop, type = "l", ylab = "",
+                     main = paste0("fraction of time H0 is rejected", ", df = ", df))
+                lines(result.b.1$beta1, result.b.1$prop, type = "l", col = "blue")
+                abline(h = 0.05, col = "red")
+                legend("right", col = c("black", "blue", "red"), lty = 1, 
+                      legend = c("t", "standard normal", "fraction = 0.05"),cex = 0.75)
+        })
+
+        with(result.b, {
+                plot(beta1, cov, type = "l", 
+                     main = paste0("coverage probability", ", df = ", df), ylab = "")
+                abline(h = 0.95, col = "red")})
+}
+```
+
+## df = 4
+
+```{r df-4, cache = TRUE}
+result.df.4 <- case.b.fun.t(df = 4, B = 100)
+```
+
+```{r t-4-plot}
+plot.b.t(result.df.4, result.b.1)
+```
+
+## df = 6
+
+```{r df-6, cache = TRUE}
+result.df.6 <- case.b.fun.t(df = 6, B = 100)
+```
+
+```{r t-6-plot}
+plot.b.t(result.df.6, result.b.1, df = 6)
+```
+
+
+```{r}
+case.b.fun.new <- function(sd = 1, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, B = 500, n = 100){
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b1.low and b1.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        # B: how many CI needs to be calculated for each mu
+        # n: sample size
+        
+        # Dataframe to store the results
+        results.b <- data.frame(beta1 = beta1, prop = rep(NA, length(beta1)), 
+                                cov = rep(NA, length(beta1)))
+
+        
+        for (i in 1:length(beta1)) {
+                # Vectors to store the results
+                ci.ind <- c()
+                cov.ind <- c()
+                k = 0
+                while (k < B) {
+                        ci.ind <- c(ci.ind, 0)
+                        cov.ind <- c(cov.ind, 0)
+                        # Generate data
+                        x1 = rnorm(n, mean = 0, sd = x.sd)
+                        err = rnorm(n, mean = 0, sd = sd)
+                        b1 <- beta1[i]
+                        x = cbind(x1)
+                        y = mu + b1 * x1 + err
+                
+                        # 1 step into Forward Selection
+                        # Get p-value & confidence interval (if significant) for beta1
+                        fsfit = fs(x = x, y = y, maxsteps = 1)
+                        out.fs <- fsInf(fsfit, alpha = 0.05)
+                    
+                        b1.pv <- out.fs$pv[1]
+                        b1.cv <- out.fs$ci[1,]
+                        # Calculate the CI if the first variable entered is x1
+                        # and the null is rejected
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                ci.ind[length(ci.ind)] <- 1
+                                k = k + 1
+                                
+                        }
+                        if (b1 < b1.cv[2] && b1.cv[1] < b1) {
+                                cov.ind[length(cov.ind)] <- 1
+                        }
+                    
+                }
+                #print(i)
+                results.b$prop[i] = mean(ci.ind)
+                if (length(cov.ind) == 0){
+                        results.b$cov[i] = 0
+                }
+                else {
+                        results.b$cov[i] = mean(cov.ind)
+                }
+        }
+        return(results.b)
+}
+
+```
+
+```{r}
+plot.b.new <- function(result.b) {
+        with(result.b, {
+                plot(beta1, prop, type = "l", 
+                     main = "fraction of time H0 is rejected", ylab = "")
+                abline(h = 0.05, col = "red")
+                legend("right", col = c( "red"), lty = 1, 
+                       legend = c("fraction = 0.05"),cex = 0.75)
+        })
+
+        with(result.b, {
+                plot(beta1, cov, type = "l", ylim = c(0.8,1),
+                     main = "coverage probability", ylab = "")
+                abline(h = 0.95, col = "red")})
+}
+
+```
+
+
+```{r new, cache = TRUE}
+result.b.new <- case.b.fun.new()
+```
+
+```{r new-plot}
+plot.b.new(result.b.new)
+```
+
+```{r}
+case.b.fun.t.new <- function(df = 4, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, B = 500, n = 100){
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b1.low and b1.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        # B: how many CI needs to be calculated for each mu
+        # n: sample size
+        
+        # Dataframe to store the results
+        results.b <- data.frame(beta1 = beta1, prop = rep(NA, length(beta1)), 
+                                cov = rep(NA, length(beta1)))
+
+        
+        for (i in 1:length(beta1)) {
+                # Vectors to store the results
+                ci.ind <- c()
+                cov.ind <- c()
+                for (k in 1:B) {
+                        ci.ind <- c(ci.ind, 0)
+                        cov.ind <- c(cov.ind, 0)
+                        # Generate data
+                        x1 = rnorm(n, mean = 0, sd = x.sd)
+                        err  = rt(n, df)
+                        
+                        b1 <- beta1[i]
+                        x = cbind(x1)
+                        y = mu + b1 * x1 + err
+                
+                        # 1 step into Forward Selection
+                        # Get p-value & confidence interval (if significant) for beta1
+                        fsfit = fs(x = x, y = y, maxsteps = 1)
+                        out.fs <- fsInf(fsfit, alpha = 0.05, bits = 100)
+                    
+                        b1.pv <- out.fs$pv[1]
+                        b1.cv <- out.fs$ci[1,]
+                        # Calculate the CI if the first variable entered is x1
+                        # and the null is rejected
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                ci.ind[length(ci.ind)] <- 1
+                        }
+                        if (b1 < b1.cv[2] && b1.cv[1] < b1) {
+                                        cov.ind[length(cov.ind)] <- 1
+                        }
+                }
+                #print(i)
+                results.b$prop[i] = mean(ci.ind)
+                if (length(cov.ind) == 0){
+                        results.b$cov[i] = 0
+                }
+                else {
+                        results.b$cov[i] = mean(cov.ind)
+                }
+        }
+        return(results.b)
+}
+
+
+```
+
+
+```{r}
+plot.b.t <- function(result.b, result.b.1, df = 4) {
+        with(result.b, {
+                plot(beta1, prop, type = "l", ylab = "",
+                     main = paste0("fraction of time H0 is rejected", ", df = ", df))
+                lines(result.b.1$beta1, result.b.1$prop, type = "l", col = "blue")
+                abline(h = 0.05, col = "red")
+                legend("right", col = c("black", "blue", "red"), lty = 1, 
+                      legend = c("t", "standard normal", "fraction = 0.05"),cex = 0.75)
+        })
+
+        with(result.b, {
+                plot(beta1, cov, type = "l", ylim = c(0.8, 1),
+                     main = paste0("coverage probability", ", df = ", df), ylab = "")
+                abline(h = 0.95, col = "red")})
+}
+```
+
+## df = 4
+
+```{r df-4-new, cache = TRUE}
+result.df.4.new <- case.b.fun.t.new(df = 4, B = 100)
+```
+
+```{r t-new-plot-4}
+plot.b.t(result.df.4.new, result.b.1)
+```
+
+## df = 6
+
+```{r df-6-new, cache = TRUE}
+result.df.6.new <- case.b.fun.t.new(df = 6, B = 100)
+```
+
+```{r t-new-plot-6}
+plot.b.t(result.df.6.new, result.b.1, df = 6)
+```
+
+```{r}
+case.b.fun.g <- function(shape = 1, rate = 1, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, B = 500, n = 100){
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b1.low and b1.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        # B: how many CI needs to be calculated for each mu
+        # n: sample size
+        
+        # Dataframe to store the results
+        results.b <- data.frame(beta1 = beta1, prop = rep(NA, length(beta1)), 
+                                cov = rep(NA, length(beta1)))
+
+        
+        for (i in 1:length(beta1)) {
+                # Vectors to store the results
+                ci.ind <- c()
+                cov.ind <- c()
+                for (k in 1:B) {
+                        ci.ind <- c(ci.ind, 0)
+                        cov.ind <- c(cov.ind, 0)
+                        # Generate data
+                        x1 = rnorm(n, mean = 0, sd = x.sd)
+                        err = rgamma(n, shape = shape, rate = rate)
+                        
+                        b1 <- beta1[i]
+                        x = cbind(x1)
+                        y = mu + b1 * x1 + err
+                
+                        # 1 step into Forward Selection
+                        # Get p-value & confidence interval (if significant) for beta1
+                        fsfit = fs(x = x, y = y, maxsteps = 1)
+                        out.fs <- fsInf(fsfit, alpha = 0.05, bits = 100)
+                    
+                        b1.pv <- out.fs$pv[1]
+                        b1.cv <- out.fs$ci[1,]
+                        # Calculate the CI if the first variable entered is x1
+                        # and the null is rejected
+                        if ((b1.pv < 0.025 || b1.pv > 0.975) && fsfit$action[1] == 1) {
+                                ci.ind[length(ci.ind)] <- 1
+                        }
+                        if (b1 < b1.cv[2] && b1.cv[1] < b1) {
+                                        cov.ind[length(cov.ind)] <- 1
+                        }
+                }
+                #print(i)
+                results.b$prop[i] = mean(ci.ind)
+                if (length(cov.ind) == 0){
+                        results.b$cov[i] = 0
+                }
+                else {
+                        results.b$cov[i] = mean(cov.ind)
+                }
+        }
+        return(results.b)
+}
+
+
+```
+
+
+```{r}
+plot.b.g <- function(result.b, result.b.1, shape = 1, rate = 1) {
+        with(result.b, {
+                plot(beta1, prop, type = "l", ylab = "",
+                     main = paste0("fraction of time H0 is rejected", ", shape = ", 
+                                   shape, ", rate = ", rate))
+                lines(result.b.1$beta1, result.b.1$prop, type = "l", col = "blue")
+                abline(h = 0.05, col = "red")
+                legend("right", col = c("black", "blue", "red"), lty = 1, 
+                      legend = c("gamma", "standard normal", "fraction = 0.05"),cex = 0.75)
+        })
+
+        with(result.b, {
+                plot(beta1, cov, type = "l", ylim = c(0.8, 1),
+                     main = paste0("coverage probability", ", shape = ", 
+                                   shape, ", rate = ", rate), ylab = "")
+                abline(h = 0.95, col = "red")})
+}
+```
+
+```{r g11, cache = TRUE}
+results.g11 <- case.b.fun.g(shape = 1, rate = 1, B = 100)
+```
+
+```{r}
+plot.b.g(results.g11, result.b.1)
+```
+
+```{r g31, cache = TRUE}
+results.g31 <- case.b.fun.g(shape = 3, rate = 1, B = 100)
+```
+
+```{r}
+plot.b.g(results.g31, result.b.1, shape = 3, rate = 1)
+```

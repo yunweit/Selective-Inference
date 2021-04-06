@@ -1,0 +1,356 @@
+---
+title: "mc.test.d"
+author: "Yunwei Tu"
+date: "28/01/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(selectiveInference)
+library(rgl)
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+# Case d
+
+```{r}
+case.d.fun <- function(sd = 1, x.sd = 4, lo = 200, mu = 2, b1.low = -2, 
+                       b1.up = 2, b2.low = -2, b2.up = 2, b3.low = -2, b3.up = 2, 
+                       B = 500, n = 100) {
+        # sd: standard deviation of the errors
+        # x.sd: standard deviation used when generating explanatory variables
+        # lo: # of betas to be considered in the range
+        # mu: value of the intercept
+        # b2.low and b2.up define the range of beta1
+        beta1 = seq(from = b1.low, to = b1.up, length.out = lo)
+        beta2 = seq(from = b2.low, to = b2.up, length.out = lo)
+        beta3 = seq(from = b3.low, to = b3.up, length.out = lo)
+        
+        
+        # Dataframe to store the results.
+        betas <- expand.grid(beta1, beta2, beta3)
+        names(betas) <- c("beta1", "beta2", "beta3")
+        
+        prop.cov <- data.frame(prop.act = rep(NA, nrow(betas)),
+                               cov.act = rep(NA, nrow(betas)), 
+                               prop.all = rep(NA, nrow(betas)),
+                               cov.all = rep(NA, nrow(betas)))
+        results.d <- cbind(betas, prop.cov)
+        
+        for (i in 1:nrow(betas)) {
+            print(i)
+            ci.ind.act <- rep(0,B)
+            cov.ind.act <- c()
+            ci.ind.all <- rep(0,B)
+            cov.ind.all <- c()
+            for (k in 1:B) {
+                # Generate data
+                x1 = rnorm(100, mean = 0, sd = x.sd)
+                x2 = rnorm(100, mean = 3, sd = x.sd)
+                x3 = rnorm(100, mean = -2, sd = x.sd)
+                err = rnorm(100, mean = 0, sd = sd)
+                x = cbind(x1, x2, x3)
+                
+                b1 <- betas[i, "beta1"]
+                b2 <- betas[i, "beta2"]
+                b3 <- betas[i, "beta3"]
+                y = mu + b1 * x1 + b2 * x2 + b3 * x3 + err
+            
+                # 2 step into Forward Selection
+                # Get p-value & confidence interval (if significant) for beta2
+                fsfit = fs(x = x, y = y, maxsteps = 2)
+                out.fs.act <- fsInf(fsfit, alpha = 0.05)
+                out.fs.all <- fsInf(fsfit, type = "all", k = 2, alpha = 0.05)
+                
+                
+                if (!(2 %in% fsfit$action)) {
+                    next
+                }
+                # Store results for type = "active"
+                b2.cv.act <- out.fs.act$ci[which(fsfit$action == 2),]
+                b2.pv.act <- out.fs.act$pv[which(fsfit$action == 2)]
+                
+                if (b2.pv.act < 0.025 || b2.pv.act > 0.975) {
+                    ci.ind.act[k] <- 1
+                }
+                cov.ind.act <- c(cov.ind.act, 0)
+                if (b2 < b2.cv.act[2] && b2.cv.act[1] < b2) {
+                    cov.ind.act[length(cov.ind.act)] <- 1
+                }
+                
+                # Store results for type = "all"
+                b2.cv.all <- out.fs.all$ci[which(fsfit$action == 2),]
+                b2.pv.all <- out.fs.all$pv[which(fsfit$action == 2)]
+                
+                if (b2.pv.all < 0.025 || b2.pv.all > 0.975) {
+                    ci.ind.all[k] <- 1
+                }
+                cov.ind.all <- c(cov.ind.all, 0)
+                if (b2 < b2.cv.all[2] && b2.cv.all[1] < b2) {
+                    cov.ind.all[length(cov.ind.all)] <- 1
+                }
+                
+            }
+            results.d$prop.act[i] = mean(ci.ind.act)
+            results.d$prop.all[i] = mean(ci.ind.all)
+            
+            if (length(cov.ind.act) == 0){
+                results.d$cov.act[i] = 0
+            }
+            else {
+                results.d$cov.act[i] = mean(cov.ind.act)
+            }
+            
+            if (length(cov.ind.all) == 0){
+                results.d$cov.all[i] = 0
+            }
+            else {
+                results.d$cov.all[i] = mean(cov.ind.all)
+            }
+        }
+        return(results.d)
+}
+
+```
+
+
+```{r, cache = TRUE}
+results.d <- case.d.fun(sd = 1, x.sd = 4, lo = 50, mu = 2, b1.low = -2, 
+                       b1.up = 2, b2.low = -2, b2.up = 2, b3.low = -2, b3.up = 2, 
+                       B = 200, n = 100)
+```
+
+
+## Plots, type = "active"
+
+### Number of time we calculate CI
+
+```{r, webgl=TRUE}
+## Plot the # of time we calculate CI
+## beta3 = -2
+beta1 = seq(from = -2, to = 2, length.out = 50)
+beta2 = seq(from = -2, to = 2, length.out = 50)
+b3 = -2
+nbcol = 100
+color = rev(rainbow(nbcol, start = 0/6, end = 4/6))
+zcol  = cut(results.d$prop.act[which(results.d$beta3 == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.act[which(results.d$beta3 == b3)], theta=50, 
+        phi=25, expand=0.75, col=color[zcol], ticktype="detailed",axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = -1.0
+b3 = -1.0
+zcol  = cut(results.d$prop.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.act[which(round(results.d$beta3, digits = 1) == b3)], theta=50, 
+        phi=25, expand=0.75, col=color[zcol], ticktype="detailed",axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 0.04
+b3 = 0.04
+zcol  = cut(results.d$prop.act[which(round(results.d$beta3, digits = 2) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.act[which(round(results.d$beta3, digits = 2) == b3)], theta=50, 
+        phi=25, expand=0.75, col=color[zcol], ticktype="detailed",axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 1.1
+b3 = 1.1
+zcol  = cut(results.d$prop.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.act[which(round(results.d$beta3, digits = 1) == b3)], theta=50, 
+        phi=25, expand=0.75, col=color[zcol], ticktype="detailed",axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 2
+b3 = 2
+zcol  = cut(results.d$prop.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.act[which(round(results.d$beta3, digits = 1) == b3)], theta=50, 
+        phi=25, expand=0.75, col=color[zcol], ticktype="detailed",axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+### Coverage Probability
+
+
+```{r, webgl=TRUE}
+## Plot the coverage probability
+## beta3 = -2
+b3 = -2
+zcol  = cut(results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = -1.0
+b3 = -1.0
+zcol  = cut(results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 0.04
+b3 = 0.04
+zcol  = cut(results.d$cov.act[which(round(results.d$beta3, digits = 2) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.act[which(round(results.d$beta3, digits = 2) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 1.1
+b3 = 1.1
+zcol  = cut(results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 2
+b3 = 2
+zcol  = cut(results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.act[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+## Plots type = "all"
+### Number of time we calculate CI
+
+```{r, webgl=TRUE}
+## Plot the # of time we calculate CI
+## beta3 = -2
+b3 = -2
+zcol  = cut(results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = -1.1
+b3 = -1.1
+zcol  = cut(results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 0.2
+b3 = 0.04
+zcol  = cut(results.d$prop.all[which(round(results.d$beta3, digits = 2) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.all[which(round(results.d$beta3, digits = 2) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 1.0
+b3 = 1.0
+zcol  = cut(results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 2
+b3 = 2
+zcol  = cut(results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$prop.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "frac")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+### Coverage Probability
+
+
+```{r, webgl=TRUE}
+## Plot the coverage probability
+## beta3 = -2
+b3 = -2
+zcol  = cut(results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = -1.1
+b3 = -1.1
+zcol  = cut(results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 0.04
+b3 = 0.04
+zcol  = cut(results.d$cov.all[which(round(results.d$beta3, digits = 2) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.all[which(round(results.d$beta3, digits = 2) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 1.1
+b3 = 1.0
+zcol  = cut(results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
+
+```{r, webgl=TRUE}
+## beta3 = 2
+b3 = 2
+zcol  = cut(results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], nbcol)
+persp3d(beta1, beta2, results.d$cov.all[which(round(results.d$beta3, digits = 1) == b3)], 
+        theta=50, phi=25, expand=0.75, col=color[zcol], ticktype="detailed", axes=TRUE, 
+        zlab = "coverage probability")
+surface3d(x = beta1, beta2, rep(0.95, 50^2), col = "grey")
+par3d(windowRect = c(20, 30, 800, 800))
+```
